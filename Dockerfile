@@ -1,24 +1,34 @@
-# 1. ベースとなるNVIDIAのCUDA環境
-FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+# 最新のCUDA環境を使用（前方互換性を活用）
+FROM nvidia/cuda:13.1.1-cudnn-devel-ubuntu22.04
 
-# 2. 必要なシステムツール（今回エラーを防ぐためのcmakeやninja）を導入
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y \
-    git python3 python3-pip python3-venv cmake ninja-build build-essential wget
+ENV LANG=C.UTF-8 \
+    DEBIAN_FRONTEND=noninteractive
 
-# 3. PyTorchのインストール
-RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# 画像・動画処理に必要なシステムパッケージと、追加のインフラパッケージをインストール
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git wget ffmpeg libgl1 libglib2.0-0 \
+    python3.10 python3-pip python3-dev \
+    aria2 git-lfs unzip curl \
+    nodejs npm \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 4. ComfyUI本体のインストール
-RUN git clone https://github.com/comfyanonymous/ComfyUI.git /ComfyUI
-RUN pip3 install -r /ComfyUI/requirements.txt
+# pythonコマンドでpython3が動くようにする
+RUN ln -s /usr/bin/python3 /usr/bin/python
 
-# 5. Qwen対応のカスタムノード（Prompt Manager）のインストール
-RUN git clone https://github.com/FranckyB/ComfyUI-Prompt-Manager.git /ComfyUI/custom_nodes/ComfyUI-Prompt-Manager
-RUN pip3 install -r /ComfyUI/custom_nodes/ComfyUI-Prompt-Manager/requirements.txt
+# パッケージリストをコピー
+COPY requirements.txt .
 
-# 6. 【重要】悩みの種だったエンジンをここで確実にビルド！
-ENV CMAKE_ARGS="-DGGML_CUDA=on"
-RUN pip3 install llama-cpp-python>=0.3.17 --upgrade --no-cache-dir
+# PyTorchをインストール (安定のcu124を指定)
+RUN pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu124
 
-WORKDIR /ComfyUI
+# 高速化・最適化ライブラリ（外部情報からご要望のxformers, triton）とLLM/VLM用ライブラリを追加
+RUN pip install --no-cache-dir xformers triton transformers pillow vllm sglang
+
+# ComfyUIの要件と、★超重要：BAN回避のための安全な中継パーツを追加インストール
+RUN pip install --no-cache-dir -r requirements.txt jupyterlab jupyter-server-proxy
+
+# Paperspace(8888)とComfyUI(8188)、TensorBoard(6006)、およびLLM推論API(8000等)のポートを開放
+EXPOSE 8888 8188 6006 8000
+
+# 起動時のデフォルトの場所（ターミナルを開いた時の初期位置）を設定
+WORKDIR /notebooks
